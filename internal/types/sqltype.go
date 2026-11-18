@@ -211,7 +211,7 @@ func AppendJSON(dst []byte, v Value) []byte {
 		if math.IsNaN(v.f) || math.IsInf(v.f, 0) {
 			return strconv.AppendQuote(dst, FormatFloat(v.f))
 		}
-		return strconv.AppendFloat(dst, v.f, 'g', -1, 64)
+		return append(dst, FormatFloat(v.f)...)
 	case KindDecimal:
 		return append(dst, v.d.String()...)
 	case KindText:

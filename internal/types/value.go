@@ -206,8 +206,20 @@ func FormatFloat(f float64) string {
 		return "Infinity"
 	case math.IsInf(f, -1):
 		return "-Infinity"
+	case f == 0:
+		if math.Signbit(f) {
+			return "-0"
+		}
+		return "0"
 	}
-	return strconv.FormatFloat(f, 'g', -1, 64)
+	// Postgres prints the shortest digits in fixed notation when the decimal
+	// exponent is in [-4, 15), and as d.ddde+XX otherwise.
+	e := strconv.FormatFloat(f, 'e', -1, 64)
+	exp, _ := strconv.Atoi(e[strings.IndexByte(e, 'e')+1:])
+	if exp < -4 || exp >= 15 {
+		return e
+	}
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 // Row is one tuple. Its position i holds column i of the producing operator.
