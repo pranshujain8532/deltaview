@@ -127,6 +127,9 @@ func (e *Engine) apply(ctx context.Context, batch []*cdc.TxnBatch) error {
 			e.hub.publish(view, Event{LSN: applied, Delta: d})
 		}
 	}
+	if e.cfg.OnApplied != nil {
+		e.cfg.OnApplied(batch, now)
+	}
 	if m != nil {
 		m.Txns.Add(float64(txns))
 		m.Rows.Add(float64(rows))

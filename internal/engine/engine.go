@@ -41,10 +41,13 @@ type Config struct {
 	SubBuffer     int  // per-subscriber event buffer (default 1024)
 
 	PrintChanges bool // log every transaction's raw changes
-	Logger       *slog.Logger
-	Metrics      *obs.Metrics
-	Tracer       *obs.Tracer
-	Failpoints   *Failpoints
+	// OnApplied, when set, is called by the apply loop after each durable
+	// commit with the transactions it contained. Benchmarks use it.
+	OnApplied  func(batch []*cdc.TxnBatch, at time.Time)
+	Logger     *slog.Logger
+	Metrics    *obs.Metrics
+	Tracer     *obs.Tracer
+	Failpoints *Failpoints
 }
 
 func (c *Config) defaults() {
