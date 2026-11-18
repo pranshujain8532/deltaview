@@ -45,6 +45,6 @@ for run in $(seq 1 "$RUNS"); do
     exit "$code"
   fi
   printf 'snapshottest run %d/%d passed: %s rows, snapshot took %.1fs, writer committed %s\n' \
-    "$run" "$RUNS" "$ROWS" "$(echo "$ready - $start" | bc)" "$(tail -n 1 "$WORK/writer.log" | cut -d, -f1)"
+    "$run" "$RUNS" "$ROWS" "$(awk "BEGIN{print $ready - $start}")" "$(tail -n 1 "$WORK/writer.log" | cut -d, -f1)"
 done
 echo "snapshottest: $RUNS of $RUNS runs passed with $ROWS rows and a live writer"

@@ -96,7 +96,11 @@ func run(ctx context.Context, o options) (int, error) {
 		return 2, fmt.Errorf("read heartbeat: %w", err)
 	}
 	if o.checkOnly {
-		return t.check(context.Background(), 0)
+		code, err := t.check(context.Background(), 0)
+		if code == 0 {
+			fmt.Printf("check passed: %d views equal to postgres at heartbeat %d\n", len(t.views), t.seq)
+		}
+		return code, err
 	}
 	start := time.Now()
 	n := 0

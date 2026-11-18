@@ -25,7 +25,7 @@ STATE="$WORK/state"
 
 go build -o "$BIN/" ./cmd/deltaview ./cmd/dvtest
 mkdir -p "$WORK"
-rm -rf "$STATE"
+rm -rf "$STATE" "$WORK/engine.log"
 "$BIN/dvtest" --reset --seed "$SEED" --initial 60 >/dev/null
 
 "$BIN/dvtest" --seed "$SEED" --txns 0 --check-every 0 --pause 2ms >"$WORK/writer.log" 2>&1 &
@@ -76,8 +76,9 @@ wait "$engine" 2>/dev/null || true
 if [ -n "$FP" ]; then
   echo "crashtest: fail point $FP fired in $fired of $CYCLES cycles"
 fi
+echo "crashtest: engine starts that resumed from stored state: $(grep -c "msg=resuming" "$WORK/engine.log" || true), that took a fresh snapshot: $(grep -c "taking initial snapshot" "$WORK/engine.log" || true)"
 if [ "$code" -ne 0 ]; then
   echo "crashtest FAILED after $CYCLES cycles (engine log: $WORK/engine.log)"
   exit "$code"
 fi
-echo "crashtest: $CYCLES cycles ($MODE ${FP}) then a clean differential check"
+echo "crashtest: $CYCLES cycles ($MODE${FP:+ $FP}) then a clean differential check"
