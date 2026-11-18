@@ -152,3 +152,42 @@ func TestPrefixEnd(t *testing.T) {
 		}
 	}
 }
+
+func TestPebbleStore(t *testing.T) {
+	runStoreSuite(t, func(t *testing.T) Store {
+		p, err := OpenPebble(t.TempDir())
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { p.Close() })
+		return p
+	})
+}
+
+func TestPebbleSurvivesReopen(t *testing.T) {
+	dir := t.TempDir()
+	p, err := OpenPebble(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commit(t, p, map[string]string{"m/applied_lsn": "42"})
+	tx := p.Begin()
+	tx.Set([]byte("never"), []byte("committed"))
+	tx.Discard()
+	if err := p.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p, err = OpenPebble(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+	snap := p.Snapshot()
+	defer snap.Close()
+	if v, ok, _ := snap.Get([]byte("m/applied_lsn")); !ok || string(v) != "42" {
+		t.Fatal("committed value lost across reopen")
+	}
+	if _, ok, _ := snap.Get([]byte("never")); ok {
+		t.Fatal("discarded value persisted")
+	}
+}

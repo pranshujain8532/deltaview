@@ -30,3 +30,13 @@ ALTER TABLE orders       REPLICA IDENTITY FULL;
 ALTER TABLE dv_heartbeat REPLICA IDENTITY FULL;
 
 CREATE PUBLICATION deltaview_pub FOR TABLE customers, orders, dv_heartbeat;
+
+-- Maps cities to regions. city is not unique, so joins on it have duplicate
+-- keys on both sides.
+CREATE TABLE regions (
+    id     bigint PRIMARY KEY,
+    city   text,
+    region text
+);
+ALTER TABLE regions REPLICA IDENTITY FULL;
+ALTER PUBLICATION deltaview_pub ADD TABLE regions;

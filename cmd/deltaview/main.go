@@ -1,83 +1,121 @@
-// Command deltaview runs the DeltaView engine. In this milestone it only
-// reads the replication stream; --print-changes prints each transaction.
+// Command deltaview runs the DeltaView engine: it reads Postgres logical
+// replication, keeps every view in views.sql up to date incrementally and
+// serves them over HTTP.
 package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"log"
+	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
-	"sync/atomic"
 	"syscall"
+	"time"
 
-	"github.com/jackc/pgx/v5"
-
-	"github.com/pranshujain8532/deltaview/internal/cdc"
+	"github.com/pranshujain8532/deltaview/internal/engine"
+	"github.com/pranshujain8532/deltaview/internal/obs"
+	"github.com/pranshujain8532/deltaview/internal/serve"
+	"github.com/pranshujain8532/deltaview/internal/state"
 )
 
 func main() {
-	pgURL := flag.String("pg", envOr("DV_PG_URL", "postgres://deltaview:deltaview@localhost:5432/deltaview?sslmode=disable"), "Postgres connection URL")
-	slot := flag.String("slot", "deltaview_slot", "replication slot name")
-	pub := flag.String("publication", "deltaview_pub", "publication name")
-	print := flag.Bool("print-changes", false, "print every transaction as it arrives")
+	var (
+		pgURL     = flag.String("pg", envOr("DV_PG_URL", "postgres://deltaview:deltaview@localhost:5432/deltaview?sslmode=disable"), "Postgres connection URL")
+		views     = flag.String("views", envOr("DV_VIEWS", "views.sql"), "file with CREATE MATERIALIZED VIEW statements")
+		stateDir  = flag.String("state-dir", envOr("DV_STATE_DIR", "data"), "Pebble state directory")
+		memory    = flag.Bool("memory", false, "keep state in memory (re-snapshot on every start)")
+		addr      = flag.String("http", envOr("DV_HTTP", ":8080"), "HTTP listen address")
+		slot      = flag.String("slot", "deltaview_slot", "replication slot name")
+		pub       = flag.String("publication", "deltaview_pub", "publication name")
+		batchMax  = flag.Int("batch-max", 1, "transactions per state commit (group commit)")
+		noSync    = flag.Bool("no-sync", false, "commit without fsync (benchmarks only; breaks crash safety)")
+		reset     = flag.Bool("reset", false, "discard state and take a fresh snapshot")
+		printChgs = flag.Bool("print-changes", false, "print every transaction's row changes")
+		verbose   = flag.Bool("v", false, "debug logging")
+	)
 	flag.Parse()
+	level := slog.LevelInfo
+	if *verbose {
+		level = slog.LevelDebug
+	}
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *pgURL, *slot, *pub, *print); err != nil && ctx.Err() == nil {
-		log.Fatal(err)
+	if err := run(ctx, log, runConfig{*pgURL, *views, *stateDir, *memory, *addr, *slot, *pub, *batchMax,
+		*noSync, *reset, *printChgs}); err != nil {
+		log.Error("deltaview stopped", "err", err)
+		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, pgURL, slot, pub string, print bool) error {
-	db, err := pgx.Connect(ctx, pgURL)
+type runConfig struct {
+	pgURL, views, stateDir string
+	memory                 bool
+	addr, slot, pub        string
+	batchMax               int
+	noSync, reset, print   bool
+}
+
+func run(ctx context.Context, log *slog.Logger, rc runConfig) error {
+	src, err := os.ReadFile(rc.views)
 	if err != nil {
-		return err
+		return fmt.Errorf("read views: %w", err)
 	}
-	defer db.Close(context.Background())
-	info, err := cdc.GetSlot(ctx, db, slot)
-	if err != nil {
-		return err
-	}
-	repl, err := cdc.ConnectReplication(ctx, pgURL)
-	if err != nil {
-		return err
-	}
-	defer repl.Close(context.Background())
-	start := info.ConfirmedFlush
-	if !info.Exists {
-		if start, _, err = cdc.CreateSlot(ctx, repl, slot); err != nil {
+	var store state.Store
+	if rc.memory {
+		store = state.NewMemory()
+	} else {
+		p, err := state.OpenPebble(rc.stateDir)
+		if err != nil {
 			return err
 		}
+		store = p
 	}
-	var acked atomic.Uint64
-	acked.Store(start)
-	out := make(chan *cdc.TxnBatch, 64)
-	r := cdc.NewReader(repl, cdc.ReaderConfig{Slot: slot, Publication: pub}, cdc.NewDecoder(nil, nil), &acked)
-	errc := make(chan error, 1)
-	go func() { errc <- r.Run(ctx, start, out) }()
-	log.Printf("streaming slot %s from %s", slot, cdc.FormatLSN(start))
-	for {
-		select {
-		case b := <-out:
-			if print {
-				fmt.Printf("txn %d end=%s commit=%s changes=%d\n", b.Xid, cdc.FormatLSN(b.EndLSN),
-					b.CommitTime.UTC().Format("15:04:05.000"), b.Changes)
-				for table, z := range b.Deltas {
-					for _, e := range z.Entries() {
-						fmt.Printf("  %s %+d %v\n", table, e.Weight, e.Row)
-					}
-				}
-			}
-			// M1 only: acknowledge after handing the batch over. M8 moves this
-			// behind a durable commit.
-			acked.Store(b.EndLSN)
-		case err := <-errc:
-			return err
+	defer store.Close()
+
+	fp, err := engine.FailpointsFromEnv()
+	if err != nil {
+		return err
+	}
+	shutdownTracing, err := obs.SetupTracing(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = shutdownTracing(context.Background()) }()
+	metrics := obs.NewMetrics(func() float64 { return float64(store.SizeBytes()) })
+
+	e, err := engine.New(ctx, engine.Config{
+		PGURL: rc.pgURL, Slot: rc.slot, Publication: rc.pub, ViewsSQL: string(src), Store: store,
+		BatchMax: rc.batchMax, NoSync: rc.noSync, Reset: rc.reset, PrintChanges: rc.print,
+		Logger: log, Metrics: metrics, Tracer: obs.NewTracer(), Failpoints: fp,
+	})
+	if err != nil {
+		return err
+	}
+
+	ln, err := net.Listen("tcp", rc.addr)
+	if err != nil {
+		return fmt.Errorf("listen %s: %w", rc.addr, err)
+	}
+	srv := &http.Server{Handler: serve.New(e, metrics), ReadHeaderTimeout: 10 * time.Second}
+	go func() {
+		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("http server", "err", err)
 		}
-	}
+	}()
+	log.Info("serving", "addr", ln.Addr().String())
+	defer func() {
+		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(sctx)
+	}()
+	return e.Run(ctx)
 }
 
 func envOr(k, def string) string {
