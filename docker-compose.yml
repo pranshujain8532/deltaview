@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:17
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_replication_slots=4
+      - -c
+      - max_wal_senders=4
+    environment:
+      POSTGRES_USER: deltaview
+      POSTGRES_PASSWORD: deltaview
+      POSTGRES_DB: deltaview
+      # DeltaView compares text byte by byte, which is what the C collation does.
+      # With a linguistic collation MIN/MAX and < on text would disagree with Postgres.
+      POSTGRES_INITDB_ARGS: "--locale=C --encoding=UTF8"
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U deltaview -d deltaview"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
