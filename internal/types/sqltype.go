@@ -87,6 +87,8 @@ const (
 
 // TypeFromOID maps a Postgres type OID to a Type. Unknown types are an error
 // at the call site: guessing a conversion would silently corrupt views.
+// real (float4) is deliberately unsupported: Postgres computes it in single
+// precision, and evaluating it as float8 gives different answers.
 func TypeFromOID(oid uint32) (Type, bool) {
 	switch oid {
 	case OIDBool:
@@ -97,8 +99,6 @@ func TypeFromOID(oid uint32) (Type, bool) {
 		return TInt4, true
 	case OIDInt8:
 		return TInt8, true
-	case OIDFloat4:
-		return TFloat4, true
 	case OIDFloat8:
 		return TFloat8, true
 	case OIDNumeric:

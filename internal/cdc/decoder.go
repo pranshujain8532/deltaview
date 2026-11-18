@@ -34,9 +34,11 @@ type TxnBatch struct {
 
 // Column is one column of a replicated table.
 type Column struct {
-	Name string
-	OID  uint32
-	Type types.Type // TUnknown when OID is not supported
+	Name   string
+	OID    uint32
+	Typmod int32      // atttypmod, e.g. the precision of numeric(12,2)
+	Attnum int16      // catalog only; pgoutput does not send it
+	Type   types.Type // TUnknown when OID is not supported
 }
 
 // Relation is a table as announced by a pgoutput Relation message.
@@ -60,7 +62,7 @@ func SameColumns(a, b []Column) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].Name != b[i].Name || a[i].OID != b[i].OID {
+		if a[i].Name != b[i].Name || a[i].OID != b[i].OID || a[i].Typmod != b[i].Typmod {
 			return false
 		}
 	}
@@ -152,7 +154,18 @@ func (d *Decoder) Handle(msg pglogrepl.Message) (*TxnBatch, error) {
 		cur.add(rel.Name, old, -1)
 		return nil, nil
 	case *pglogrepl.TruncateMessage:
-		return nil, ErrTruncate
+		// Only a truncate of a table the views read is fatal; others in the
+		// same publication do not affect any view.
+		if len(m.RelationIDs) == 0 {
+			return nil, ErrTruncate
+		}
+		for _, id := range m.RelationIDs {
+			rel, ok := d.rels[id]
+			if !ok || d.want == nil || d.want(rel.Name) {
+				return nil, ErrTruncate
+			}
+		}
+		return nil, nil
 	case *pglogrepl.CommitMessage:
 		if d.cur == nil {
 			return nil, fmt.Errorf("%w: Commit without Begin", ErrProtocol)
@@ -172,7 +185,7 @@ func (d *Decoder) relation(m *pglogrepl.RelationMessage) error {
 	rel := &Relation{ID: m.RelationID, Name: QualifiedName(m.Namespace, m.RelationName)}
 	for _, c := range m.Columns {
 		t, _ := types.TypeFromOID(c.DataType)
-		rel.Columns = append(rel.Columns, Column{Name: c.Name, OID: c.DataType, Type: t})
+		rel.Columns = append(rel.Columns, Column{Name: c.Name, OID: c.DataType, Typmod: c.TypeModifier, Type: t})
 	}
 	if want, ok := d.expect[rel.Name]; ok && !SameColumns(want, rel.Columns) {
 		return fmt.Errorf("%w: %s was %s, stream now says %s",
@@ -188,7 +201,7 @@ func describe(cols []Column) string {
 		if i > 0 {
 			s += ", "
 		}
-		s += fmt.Sprintf("%s oid %d", c.Name, c.OID)
+		s += fmt.Sprintf("%s oid %d typmod %d", c.Name, c.OID, c.Typmod)
 	}
 	return s + ")"
 }

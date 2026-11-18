@@ -2,6 +2,7 @@ package ops
 
 import (
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/shopspring/decimal"
@@ -63,10 +64,16 @@ type aggState struct {
 	count int64
 	nn    []int64       // non-null input count per aggregate
 	sum   []types.Value // decimal or float sum per aggregate (SUM, AVG)
+	// Float sums keep +Infinity, -Infinity and NaN inputs as counts instead
+	// of adding them: Inf - Inf is NaN, so deleting an infinite row could
+	// never be undone in a plain float accumulator.
+	inf [][3]int64 // +Inf, -Inf, NaN counts per aggregate
 }
 
+const stateFields = 5 // per aggregate: nn, sum, +Inf, -Inf, NaN
+
 func (a *Aggregate) zeroState() *aggState {
-	st := &aggState{nn: make([]int64, len(a.Aggs)), sum: make([]types.Value, len(a.Aggs))}
+	st := &aggState{nn: make([]int64, len(a.Aggs)), sum: make([]types.Value, len(a.Aggs)), inf: make([][3]int64, len(a.Aggs))}
 	for i, s := range a.Aggs {
 		if s.Kind == Sum || s.Kind == Avg {
 			if isFloat(s.Arg) {
@@ -100,15 +107,17 @@ func (a *Aggregate) load(tx state.Tx, gk []byte) (*aggState, error) {
 		return st, nil
 	}
 	r, err := types.Decode(b)
-	if err != nil || len(r) != 1+2*len(a.Aggs) {
+	if err != nil || len(r) != 1+stateFields*len(a.Aggs) {
 		return nil, fmt.Errorf("aggregate state: corrupt value (%v)", err)
 	}
 	st.count = r[0].AsInt()
 	for i := range a.Aggs {
-		st.nn[i] = r[1+2*i].AsInt()
-		if v := r[2+2*i]; !v.IsNull() {
-			st.sum[i] = v
+		f := r[1+stateFields*i:]
+		st.nn[i] = f[0].AsInt()
+		if !f[1].IsNull() {
+			st.sum[i] = f[1]
 		}
+		st.inf[i] = [3]int64{f[2].AsInt(), f[3].AsInt(), f[4].AsInt()}
 	}
 	return st, nil
 }
@@ -118,7 +127,7 @@ func (a *Aggregate) save(tx state.Tx, gk []byte, st *aggState) {
 		tx.Delete(a.stateKey(gk))
 		return
 	}
-	r := make(types.Row, 0, 1+2*len(a.Aggs))
+	r := make(types.Row, 0, 1+stateFields*len(a.Aggs))
 	r = append(r, types.Int(st.count))
 	for i := range a.Aggs {
 		r = append(r, types.Int(st.nn[i]))
@@ -127,6 +136,7 @@ func (a *Aggregate) save(tx state.Tx, gk []byte, st *aggState) {
 		} else {
 			r = append(r, st.sum[i])
 		}
+		r = append(r, types.Int(st.inf[i][0]), types.Int(st.inf[i][1]), types.Int(st.inf[i][2]))
 	}
 	tx.Set(a.stateKey(gk), types.Encode(r))
 }
@@ -165,10 +175,13 @@ func (a *Aggregate) aggValue(tx state.Tx, i int, s AggSpec, gk []byte, st *aggSt
 			}
 			return types.Int(d.IntPart()), nil
 		}
+		if st.sum[i].Kind() == types.KindFloat {
+			return types.Float(floatSum(st, i)), nil
+		}
 		return st.sum[i], nil
 	case Avg:
 		if st.sum[i].Kind() == types.KindFloat {
-			return types.Float(st.sum[i].AsFloat() / float64(st.nn[i])), nil
+			return types.Float(floatSum(st, i) / float64(st.nn[i])), nil
 		}
 		return expr.NumericArith(expr.OpDiv, st.sum[i].AsDecimal(), decimal.NewFromInt(st.nn[i]))
 	case Min, Max:
@@ -266,7 +279,16 @@ func (a *Aggregate) stepGroup(tx state.Tx, g *group, out *zset.ZSet) error {
 			switch s.Kind {
 			case Sum, Avg:
 				if st.sum[i].Kind() == types.KindFloat {
-					st.sum[i] = types.Float(st.sum[i].AsFloat() + float64(e.Weight)*v.AsFloat())
+					switch f := v.AsFloat(); {
+					case math.IsNaN(f):
+						st.inf[i][2] += e.Weight
+					case math.IsInf(f, 1):
+						st.inf[i][0] += e.Weight
+					case math.IsInf(f, -1):
+						st.inf[i][1] += e.Weight
+					default:
+						st.sum[i] = types.Float(st.sum[i].AsFloat() + float64(e.Weight)*f)
+					}
 				} else {
 					st.sum[i] = types.Decimal(st.sum[i].AsDecimal().Add(v.AsDecimal().Mul(decimal.NewFromInt(e.Weight))))
 				}
@@ -307,4 +329,19 @@ func (a *Aggregate) stepGroup(tx state.Tx, g *group, out *zset.ZSet) error {
 		out.Add(now, 1)
 	}
 	return nil
+}
+
+// floatSum combines the finite sum with the non-finite counts the way IEEE
+// addition would have: any NaN, or both infinities, give NaN.
+func floatSum(st *aggState, i int) float64 {
+	c := st.inf[i]
+	switch {
+	case c[2] > 0 || (c[0] > 0 && c[1] > 0):
+		return math.NaN()
+	case c[0] > 0:
+		return math.Inf(1)
+	case c[1] > 0:
+		return math.Inf(-1)
+	}
+	return st.sum[i].AsFloat()
 }

@@ -182,3 +182,29 @@ func TestProtocolOrder(t *testing.T) {
 		t.Fatalf("nested begin: %v", err)
 	}
 }
+
+func TestTruncateOfUnwantedTableIsIgnored(t *testing.T) {
+	d := NewDecoder(nil, func(name string) bool { return name == "orders" })
+	run(t, d, ordersRel(), relMsg(5, "audit_log", [2]any{"id", types.OIDInt8}), &pglogrepl.BeginMessage{})
+	if _, err := d.Handle(&pglogrepl.TruncateMessage{RelationIDs: []uint32{5}}); err != nil {
+		t.Fatalf("truncate of a table no view reads must not stop the stream: %v", err)
+	}
+	if _, err := d.Handle(&pglogrepl.TruncateMessage{RelationIDs: []uint32{5, 1}}); !errors.Is(err, ErrTruncate) {
+		t.Fatalf("truncate of orders must stop the stream, got %v", err)
+	}
+}
+
+func TestTypmodChangeIsASchemaChange(t *testing.T) {
+	expect := map[string][]Column{"orders": {
+		{Name: "id", OID: types.OIDInt8, Typmod: -1}, {Name: "status", OID: types.OIDText, Typmod: -1},
+		{Name: "amount", OID: types.OIDNumeric, Typmod: 786438}, // numeric(12,2)
+	}}
+	m := ordersRel()
+	for _, c := range m.Columns {
+		c.TypeModifier = -1
+	}
+	m.Columns[2].TypeModifier = 917510 // numeric(14,2)
+	if _, err := NewDecoder(expect, nil).Handle(m); !errors.Is(err, ErrSchemaChanged) {
+		t.Fatalf("want ErrSchemaChanged, got %v", err)
+	}
+}

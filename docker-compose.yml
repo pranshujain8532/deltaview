@@ -1,3 +1,6 @@
+# docker compose up        Postgres + DeltaView + a load generator (the demo),
+#                          then open http://localhost:8080
+# make up                  Postgres only, for development and tests
 services:
   postgres:
     image: postgres:17
@@ -25,3 +28,31 @@ services:
       interval: 1s
       timeout: 3s
       retries: 60
+
+  deltaview:
+    build: .
+    environment:
+      DV_PG_URL: postgres://deltaview:deltaview@postgres:5432/deltaview?sslmode=disable
+    ports:
+      - "8080:8080"
+    volumes:
+      - dvdata:/data
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+  # Writes random orders, customers and regions with the tester's workload.
+  loadgen:
+    build: .
+    entrypoint: ["/usr/local/bin/dvtest"]
+    command: ["--views", "/app/views.sql", "--txns", "0", "--check-every", "0", "--pause", "150ms", "--seed", "42"]
+    environment:
+      DV_PG_URL: postgres://deltaview:deltaview@postgres:5432/deltaview?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+
+volumes:
+  dvdata:

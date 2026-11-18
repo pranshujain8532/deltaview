@@ -795,7 +795,7 @@ func typeByName(tn *pg.TypeName) (types.Type, error) {
 		}
 		return types.TNumeric, nil
 	case "float4", "real":
-		return types.TFloat8, nil
+		return 0, unsupported("type real", "single-precision arithmetic is not modelled; use double precision")
 	case "float8", "double precision":
 		return types.TFloat8, nil
 	case "text", "varchar":
@@ -1235,7 +1235,7 @@ func (b *binder) bindAggCall(name string, kind ops.AggKind, f *pg.FuncCall, sc *
 	}
 	key := spec.Kind.String()
 	if spec.Arg != nil {
-		key += "(" + spec.Arg.String() + ")"
+		key += "(" + spec.Arg.String() + " " + spec.Arg.Type().String() + ")"
 	}
 	idx, ok := b.aggKeys[key]
 	if !ok {

@@ -337,3 +337,64 @@ func TestCrashAfterCommitBeforeAck(t *testing.T) {
 		t.Fatalf("after restart: view %v, postgres %v (a re-sent transaction was applied twice?)", got, want)
 	}
 }
+
+// Restoring an older copy of the state store leaves the slot ahead of the
+// stored LSN. Postgres would resume at the slot's position and skip the gap,
+// so the engine must take a fresh snapshot instead.
+func TestRestoredOlderStateResnapshots(t *testing.T) {
+	db := pg(t)
+	resetTables(t, db)
+	live, backup := t.TempDir(), t.TempDir()
+	phase := func(dir string, ids ...int) {
+		store, err := state.OpenPebble(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		r := start(t, store, nil)
+		for _, id := range ids {
+			run(t, db, fmt.Sprintf("INSERT INTO orders VALUES (%d, 1, 'paid', 1, now())", id))
+		}
+		sync_(t, db, r.e)
+		r.stop()
+		store.Close()
+	}
+	phase(live, 1, 2, 3)
+	if err := os.CopyFS(backup+"/s", os.DirFS(live)); err != nil {
+		t.Fatal(err)
+	}
+	phase(live, 4, 5, 6) // the slot moves past the backup
+
+	store, err := state.OpenPebble(backup + "/s")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	r := start(t, store, nil)
+	sync_(t, db, r.e)
+	_, rows, _, err := r.e.ReadView("orders_per_status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := postgresView(t, db, "SELECT status, COUNT(*) FROM orders GROUP BY status")
+	if got := zsetRows(rows); strings.Join(got, ";") != strings.Join(want, ";") {
+		t.Fatalf("restored state served %v, postgres has %v", got, want)
+	}
+}
+
+func TestUnfollowableTablesAreRejected(t *testing.T) {
+	db := pg(t)
+	run(t, db, "DROP TABLE IF EXISTS pubcheck_t, part_t",
+		"CREATE TABLE pubcheck_t (id int PRIMARY KEY)", "ALTER TABLE pubcheck_t REPLICA IDENTITY FULL",
+		"CREATE TABLE part_t (id int) PARTITION BY RANGE (id)")
+	t.Cleanup(func() { _, _ = db.Exec(context.Background(), "DROP TABLE IF EXISTS pubcheck_t, part_t") })
+	for view, msg := range map[string]string{
+		"SELECT id FROM pubcheck_t": "not in publication",
+		"SELECT id FROM part_t":     "partitioned",
+	} {
+		_, err := New(context.Background(), Config{PGURL: os.Getenv("DV_PG_URL"), Slot: testSlot,
+			ViewsSQL: "CREATE MATERIALIZED VIEW v AS " + view + ";", Store: state.NewMemory()})
+		if err == nil || !strings.Contains(err.Error(), msg) {
+			t.Errorf("%s: want error containing %q, got %v", view, msg, err)
+		}
+	}
+}

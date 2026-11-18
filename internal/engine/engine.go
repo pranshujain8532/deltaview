@@ -184,6 +184,13 @@ func New(ctx context.Context, cfg Config) (*Engine, error) {
 	if e.hbSeqCol < 0 {
 		return nil, fmt.Errorf("engine: %s needs an integer column seq", cfg.Heartbeat)
 	}
+	srcs := make([]*cdc.Table, 0, len(e.tables))
+	for _, t := range e.tables {
+		srcs = append(srcs, t)
+	}
+	if err := cdc.CheckPublication(ctx, db, cfg.Publication, srcs); err != nil {
+		return nil, err
+	}
 	for _, t := range e.tables {
 		if t.ReplicaIdentity != 'f' {
 			return nil, fmt.Errorf("engine: table %s must use REPLICA IDENTITY FULL "+
@@ -259,7 +266,7 @@ func (e *Engine) fingerprint() string {
 	for _, n := range names {
 		fmt.Fprintf(h, "table %s", n)
 		for _, c := range e.tables[n].Columns {
-			fmt.Fprintf(h, " %s:%d", c.Name, c.OID)
+			fmt.Fprintf(h, " %s:%d:%d:%d", c.Name, c.OID, c.Typmod, c.Attnum)
 		}
 		h.Write([]byte{0})
 	}
@@ -345,8 +352,9 @@ func (e *Engine) needsSnapshot(ctx context.Context, db *pgx.Conn) (string, error
 	snap := e.store.Snapshot()
 	_, done, err := snap.Get(state.KeySnapshotDone)
 	fp, _, err2 := snap.Get(state.KeyViewsHash)
+	applied, err3 := state.GetLSN(snap, state.KeyAppliedLSN)
 	snap.Close()
-	if err = errors.Join(err, err2); err != nil {
+	if err = errors.Join(err, err2, err3); err != nil {
 		return "", err
 	}
 	slot, err := cdc.GetSlot(ctx, db, e.cfg.Slot)
@@ -362,6 +370,12 @@ func (e *Engine) needsSnapshot(ctx context.Context, db *pgx.Conn) (string, error
 		return "replication slot " + e.cfg.Slot + " is missing", nil
 	case slot.WALStatus == "lost":
 		return "replication slot lost WAL it needed (wal_status = lost)", nil
+	case slot.ConfirmedFlush > applied:
+		// Postgres would start streaming at the slot's position and silently
+		// skip everything between it and our state (a restored backup, or a
+		// slot another process advanced). Only a fresh snapshot is correct.
+		return fmt.Sprintf("slot confirmed %s but stored state is at %s",
+			cdc.FormatLSN(slot.ConfirmedFlush), cdc.FormatLSN(applied)), nil
 	}
 	return "", nil
 }

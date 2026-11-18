@@ -27,6 +27,9 @@ type Table struct {
 // ErrNoSuchTable is returned when a view names a table that does not exist.
 var ErrNoSuchTable = errors.New("no such table")
 
+// ErrUnsupportedTable is returned for relations DeltaView cannot follow.
+var ErrUnsupportedTable = errors.New("unsupported source table")
+
 // SplitName splits "schema.table" (or "table", meaning public.table).
 func SplitName(name string) (namespace, rel string) {
 	if i := strings.IndexByte(name, '.'); i >= 0 {
@@ -40,19 +43,32 @@ func SplitName(name string) (namespace, rel string) {
 func LoadTable(ctx context.Context, conn *pgx.Conn, name string) (*Table, error) {
 	ns, rel := SplitName(name)
 	t := &Table{Name: QualifiedName(ns, rel), Namespace: ns, Relname: rel}
-	var ident string
+	var ident, kind string
+	var inherits bool
 	err := conn.QueryRow(ctx, `
-		SELECT c.relreplident::text FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-		WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p')`, ns, rel).Scan(&ident)
+		SELECT c.relreplident::text, c.relkind::text,
+		       EXISTS (SELECT 1 FROM pg_inherits i WHERE i.inhparent = c.oid OR i.inhrelid = c.oid)
+		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+		WHERE n.nspname = $1 AND c.relname = $2 AND c.relkind IN ('r', 'p', 'v', 'm', 'f')`, ns, rel).
+		Scan(&ident, &kind, &inherits)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, fmt.Errorf("%w: %s", ErrNoSuchTable, t.Name)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("cdc: read catalog for %s: %w", t.Name, err)
 	}
+	// Changes to partitions and inheritance children are published under the
+	// child's name while a snapshot of the parent reads them all, so views
+	// over such tables would silently stop changing. Refuse them.
+	switch {
+	case kind == "p" || inherits:
+		return nil, fmt.Errorf("%w: %s is partitioned or part of an inheritance tree", ErrUnsupportedTable, t.Name)
+	case kind != "r":
+		return nil, fmt.Errorf("%w: %s is not an ordinary table", ErrUnsupportedTable, t.Name)
+	}
 	t.ReplicaIdentity = ident[0]
 	rows, err := conn.Query(ctx, `
-		SELECT a.attname, a.atttypid FROM pg_attribute a
+		SELECT a.attname, a.atttypid, a.atttypmod, a.attnum FROM pg_attribute a
 		JOIN pg_class c ON c.oid = a.attrelid JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname = $1 AND c.relname = $2 AND a.attnum > 0 AND NOT a.attisdropped
 		  AND a.attgenerated = ''
@@ -63,7 +79,7 @@ func LoadTable(ctx context.Context, conn *pgx.Conn, name string) (*Table, error)
 	defer rows.Close()
 	for rows.Next() {
 		var c Column
-		if err := rows.Scan(&c.Name, &c.OID); err != nil {
+		if err := rows.Scan(&c.Name, &c.OID, &c.Typmod, &c.Attnum); err != nil {
 			return nil, fmt.Errorf("cdc: scan column of %s: %w", t.Name, err)
 		}
 		c.Type, _ = types.TypeFromOID(c.OID)
@@ -190,4 +206,45 @@ func CreateSlot(ctx context.Context, repl *pgconn.PgConn, slot string) (consiste
 		return 0, "", fmt.Errorf("cdc: consistent point %q: %w", res.ConsistentPoint, err)
 	}
 	return lsn, res.SnapshotName, nil
+}
+
+// CheckPublication verifies that the publication streams every change of
+// the given tables: inserts, updates, deletes and truncates, with no row
+// filter and no column list. Otherwise the snapshot would see rows the
+// stream never updates, and the views would drift without any error.
+func CheckPublication(ctx context.Context, conn *pgx.Conn, pub string, tables []*Table) error {
+	var ins, upd, del, trunc bool
+	err := conn.QueryRow(ctx, `SELECT pubinsert, pubupdate, pubdelete, pubtruncate FROM pg_publication WHERE pubname = $1`,
+		pub).Scan(&ins, &upd, &del, &trunc)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("cdc: publication %s does not exist", pub)
+	}
+	if err != nil {
+		return fmt.Errorf("cdc: read publication %s: %w", pub, err)
+	}
+	if !ins || !upd || !del || !trunc {
+		return fmt.Errorf("cdc: publication %s must publish insert, update, delete and truncate", pub)
+	}
+	for _, t := range tables {
+		var unfiltered bool
+		var ncols int
+		err := conn.QueryRow(ctx, `
+			SELECT rowfilter IS NULL, coalesce(array_length(attnames, 1), 0)
+			FROM pg_publication_tables WHERE pubname = $1 AND schemaname = $2 AND tablename = $3`,
+			pub, t.Namespace, t.Relname).Scan(&unfiltered, &ncols)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("cdc: table %s is not in publication %s (ALTER PUBLICATION %s ADD TABLE %s)",
+				t.Name, pub, pub, t.Name)
+		}
+		if err != nil {
+			return fmt.Errorf("cdc: read publication tables: %w", err)
+		}
+		if !unfiltered {
+			return fmt.Errorf("cdc: table %s has a row filter in publication %s; DeltaView needs every row", t.Name, pub)
+		}
+		if ncols != len(t.Columns) {
+			return fmt.Errorf("cdc: table %s has a column list in publication %s; DeltaView needs every column", t.Name, pub)
+		}
+	}
+	return nil
 }

@@ -169,8 +169,10 @@ func NumericArith(op ArithOp, x, y decimal.Decimal) (types.Value, error) {
 		if y.IsZero() {
 			return types.Value{}, ErrDivisionByZero
 		}
-		q := x.Div(y).Truncate(0)
-		return types.Decimal(x.Sub(q.Mul(y))), nil
+		// QuoRem truncates the quotient exactly; Div would round it to 16
+		// places first and could flip the sign of the remainder.
+		_, r := x.QuoRem(y, 0)
+		return types.Decimal(r), nil
 	}
 	return types.Value{}, fmt.Errorf("numeric operator %c", op)
 }
@@ -445,10 +447,15 @@ func parseLiteral(s string, to types.Type) (types.Value, error) {
 		}
 	case types.TTimestamp, types.TTimestamptz:
 		// Literals without a zone are read as UTC (DeltaView runs in UTC).
+		// For timestamp without time zone Postgres ignores a given offset,
+		// so the wall-clock time is kept as written.
 		for _, layout := range []string{"2006-01-02 15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999Z07",
 			"2006-01-02T15:04:05.999999999Z07:00", "2006-01-02 15:04:05.999999999", "2006-01-02T15:04:05.999999999",
 			"2006-01-02"} {
 			if tm, err := time.Parse(layout, t); err == nil {
+				if to == types.TTimestamp {
+					tm = time.Date(tm.Year(), tm.Month(), tm.Day(), tm.Hour(), tm.Minute(), tm.Second(), tm.Nanosecond(), time.UTC)
+				}
 				return types.TimestampFromTime(tm), nil
 			}
 		}
