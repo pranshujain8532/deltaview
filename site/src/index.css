@@ -1,24 +1,27 @@
 @import "tailwindcss";
 
-/* Printed-paper palette: warm paper, carbon ink, two printing inks.
-   plus (green) marks +1 / inserts / DeltaView; minus (vermilion) marks
-   -1 / deletes / REFRESH. Validated for contrast and color-vision on paper;
-   every use also carries a sign or a label, never color alone. */
+/* "Signal" palette: graphite, bone-white type, and two signal inks.
+   plus (lime) = +1 / inserts / DeltaView; minus (magenta) = -1 / deletes /
+   REFRESH. plus/minus are the validated chart steps; *-hi are the brighter
+   steps for text and glows on dark. Every use also carries a sign or label. */
 @theme {
-  --color-paper: #f2efe6;
-  --color-paper-2: #e9e5d8;
-  --color-paper-3: #dfdac9;
-  --color-ink: #151412;
-  --color-ink-2: #4f4b42;
-  --color-ink-3: #8a8474;
-  --color-rule: #cfc8b4;
-  --color-plus: #2f7d4f;
-  --color-minus: #d4471f;
-  --color-marker: #f0c419;
+  --color-bg: #0c0d0c;
+  --color-bg-2: #121412;
+  --color-bg-3: #1a1d19;
+  --color-line: #262a25;
+  --color-line-2: #3a3f37;
+  --color-fg: #eef0ea;
+  --color-fg-2: #a3a89e;
+  --color-fg-3: #6b7067;
+  --color-lime: #c8f04b;
+  --color-plus: #6fa728;
+  --color-plus-hi: #a6dc5c;
+  --color-minus: #e44a8f;
+  --color-minus-hi: #ff7eb6;
 
   --font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-serif: "Instrument Serif", ui-serif, Georgia, serif;
+  --font-display: "Archivo", "Geist", ui-sans-serif, sans-serif;
 
   --animate-marquee: marquee var(--duration) linear infinite;
   --animate-marquee-vertical: marquee-vertical var(--duration) linear infinite;
@@ -33,8 +36,9 @@
 }
 
 html {
-  background: var(--color-paper);
-  color: var(--color-ink);
+  background: var(--color-bg);
+  color: var(--color-fg);
+  color-scheme: dark;
   scroll-behavior: smooth;
   -webkit-font-smoothing: antialiased;
 }
@@ -45,20 +49,32 @@ body {
 }
 
 ::selection {
-  background: var(--color-marker);
-  color: var(--color-ink);
+  background: var(--color-lime);
+  color: var(--color-bg);
 }
 
-/* Fine paper grain, so flat areas do not look like a screen. */
+/* Display type: Archivo, slightly expanded, tight. */
+.display {
+  font-family: var(--font-display);
+  font-stretch: 112%;
+  font-weight: 700;
+  letter-spacing: -0.035em;
+}
+
+.outline-text {
+  color: transparent;
+  -webkit-text-stroke: 1.2px var(--color-fg-2);
+}
+
+/* Film grain so flat dark areas do not band. */
 .grain::before {
   content: "";
   position: fixed;
   inset: 0;
   pointer-events: none;
   z-index: 60;
-  opacity: 0.18;
-  mix-blend-mode: multiply;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.08 0 0 0 0 0.07 0 0 0 0 0.06 0 0 0 .35 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  opacity: 0.07;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 .eyebrow {
@@ -66,15 +82,29 @@ body {
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--color-ink-3);
+  color: var(--color-fg-3);
 }
 
 .hairline {
-  border-color: var(--color-rule);
+  border-color: var(--color-line);
 }
 
 .tabular {
   font-variant-numeric: tabular-nums;
+}
+
+.panel {
+  background: var(--color-bg-2);
+  border: 1px solid var(--color-line);
+  border-radius: 14px;
+}
+
+/* A faint engineering grid behind sections. */
+.grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(238, 240, 234, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(238, 240, 234, 0.035) 1px, transparent 1px);
+  background-size: 56px 56px;
 }
 
 @media (prefers-reduced-motion: reduce) {

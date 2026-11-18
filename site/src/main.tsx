@@ -11,6 +11,7 @@ import { Live } from './sections/Live'
 import { Guarantees, Proof } from './sections/Proof'
 import { Numbers } from './sections/Numbers'
 import { Closing } from './sections/Closing'
+import { Statement, Velocity } from './sections/Interludes'
 
 function App() {
   return (
@@ -19,9 +20,11 @@ function App() {
         <Nav />
         <main>
           <Hero />
+          <Statement />
           <Problem />
           <Mechanism />
           <Architecture />
+          <Velocity />
           <Playground />
           <Live />
           <Proof />

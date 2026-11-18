@@ -4,7 +4,7 @@ import SpotlightCard from '@/components/rb/SpotlightCard'
 import CountUp from '@/components/rb/CountUp'
 import { Terminal, AnimatedSpan, TypingAnimation } from '@/components/magicui/terminal'
 import { proof } from '@/lib/data'
-import { Reveal, SectionHead, Serif } from './ui'
+import { Reveal, SectionHead, Hi } from './ui'
 
 const loop = [
   'for each transaction from the slot:',
@@ -30,31 +30,31 @@ export function Guarantees() {
       <div className="grid grid-cols-12 gap-x-6 gap-y-10">
         <Reveal className="col-span-12 lg:col-span-5">
           <p className="eyebrow">Exactly once</p>
-          <h3 className="mt-4 text-[clamp(1.8rem,3vw,2.6rem)] leading-tight font-medium tracking-[-0.035em]">
-            At-least-once delivery, plus state and position saved <Serif>together</Serif>, equals exactly-once.
+          <h3 className="mt-4 text-[clamp(1.8rem,3vw,2.6rem)] leading-tight display">
+            At-least-once delivery, plus state and position saved <Hi>together</Hi>, equals exactly-once.
           </h3>
-          <p className="mt-5 text-ink-2">Pick a moment to pull the plug. Each one is a fail point in the engine, exercised 30 times in a row by the crash test.</p>
+          <p className="mt-5 text-fg-2">Pick a moment to pull the plug. Each one is a fail point in the engine, exercised 30 times in a row by the crash test.</p>
           <div className="mt-8 flex flex-col gap-2">
             {crashes.map((x, k) => (
               <button key={x.name} onClick={() => setC(k)}
-                className={`flex items-center justify-between border px-4 py-3 text-left text-[14px] transition-colors ${k === c ? 'border-ink bg-ink text-paper' : 'hairline hover:border-ink'}`}>
+                className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left text-[14px] transition-colors ${k === c ? 'border-minus-hi/60 bg-minus/15 text-fg' : 'hairline hover:border-line-2'}`}>
                 <span>Crash {x.name}</span><span className="font-mono text-[11px] opacity-60">kill -9</span>
               </button>
             ))}
           </div>
         </Reveal>
         <Reveal delay={0.1} className="col-span-12 lg:col-span-7">
-          <div className="border border-ink bg-paper">
-            <div className="border-b border-ink px-4 py-2 font-mono text-[11px] text-ink-2">internal/engine/apply.go</div>
+          <div className="panel">
+            <div className="border-b border-line-2 px-4 py-2 font-mono text-[11px] text-fg-2">internal/engine/apply.go</div>
             <div className="py-3 font-mono text-[13px] leading-7">
               {loop.map((l, k) => (
                 <div key={k}>
-                  <div className={`flex gap-4 px-4 transition-colors ${k <= crashes[c].at ? 'text-ink' : 'text-ink-3'}`}>
-                    <span className="w-5 shrink-0 text-right text-ink-3">{k + 1}</span>
+                  <div className={`flex gap-4 px-4 transition-colors ${k <= crashes[c].at ? 'text-fg' : 'text-fg-3'}`}>
+                    <span className="w-5 shrink-0 text-right text-fg-3">{k + 1}</span>
                     <span className="whitespace-pre">{l}</span>
                   </div>
                   {k === crashes[c].at && (
-                    <motion.div layoutId="crash" className="mx-4 my-1 flex items-center gap-3 border-y border-dashed border-minus py-1 text-minus">
+                    <motion.div layoutId="crash" className="mx-4 my-1 flex items-center gap-3 border-y border-dashed border-minus py-1 text-minus-hi">
                       <span>✕</span><span className="text-[12px]">process killed here</span>
                     </motion.div>
                   )}
@@ -63,8 +63,8 @@ export function Guarantees() {
             </div>
             <AnimatePresence mode="wait">
               <motion.div key={c} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
-                className="grid grid-cols-1 border-t border-ink md:grid-cols-2">
-                <div className="border-b border-ink p-4 md:border-r md:border-b-0">
+                className="grid grid-cols-1 border-t border-line-2 md:grid-cols-2">
+                <div className="border-b border-line-2 p-4 md:border-r md:border-b-0">
                   <p className="eyebrow">On disk</p><p className="mt-2 text-[15px]">{crashes[c].disk}</p>
                 </div>
                 <div className="p-4"><p className="eyebrow">After restart</p><p className="mt-2 text-[15px]">{crashes[c].after}</p></div>
@@ -83,18 +83,18 @@ export function Proof() {
       <SectionHead
         n="05"
         label="Proof"
-        title={<>Postgres is the <Serif>judge</Serif>.</>}
+        title={<>Postgres is the <Hi>judge</Hi>.</>}
         kicker="A differential tester writes random transactions, waits on a heartbeat row until the engine has caught up, then compares every view with the same SELECT run on Postgres, as multisets. Planted bugs prove the tester can see them."
       />
-      <div className="mt-14 grid grid-cols-1 gap-px border border-ink bg-ink sm:grid-cols-2 lg:grid-cols-3">
+      <div className="mt-14 grid grid-cols-1 gap-px overflow-hidden rounded-2xl border hairline bg-line sm:grid-cols-2 lg:grid-cols-3">
         {proof.map((p, k) => (
-          <Reveal key={p.label} delay={k * 0.06} className="bg-paper">
-            <SpotlightCard theme="light" spotlightColor="rgba(240,196,25,0.28)" className="!h-full !rounded-none !border-0 !bg-paper !p-7 !shadow-none">
-              <div className="text-[clamp(2.6rem,4.6vw,4.2rem)] leading-none font-medium tracking-[-0.05em] tabular">
+          <Reveal key={p.label} delay={k * 0.06} className="bg-bg-2">
+            <SpotlightCard theme="dark" spotlightColor="rgba(200,240,75,0.16)" className="!h-full !rounded-none !border-0 !bg-bg !p-7 !shadow-none">
+              <div className="text-[clamp(2.6rem,4.6vw,4.2rem)] leading-none display tabular">
                 <CountUp to={p.value} separator="," duration={1.8} />
               </div>
               <p className="mt-2 text-[15px] font-medium">{p.label}</p>
-              <p className="mt-3 max-w-[34ch] text-[13.5px] leading-relaxed text-ink-2">{p.detail}</p>
+              <p className="mt-3 max-w-[34ch] text-[13.5px] leading-relaxed text-fg-2">{p.detail}</p>
             </SpotlightCard>
           </Reveal>
         ))}
@@ -102,7 +102,7 @@ export function Proof() {
       <div className="mt-10 grid grid-cols-12 gap-6">
         <Reveal className="col-span-12 lg:col-span-5">
           <p className="eyebrow">Planted bugs, all caught</p>
-          <ul className="mt-4 divide-y divide-[var(--color-rule)] border-y hairline text-[14px]">
+          <ul className="mt-4 divide-y divide-[var(--color-line)] border-y hairline text-[14px]">
             {[
               ['Filter ignores deletes', 'after 20 txns'],
               ['MIN ignores deletes', 'after 20 txns'],
@@ -111,21 +111,21 @@ export function Proof() {
               ['Integer division floors', '−7 / 2'],
               ['Ack before commit, then crash', 'engine refuses'],
             ].map(([a, b]) => (
-              <li key={a} className="flex justify-between py-2.5"><span>{a}</span><span className="font-mono text-[12px] text-minus">{b}</span></li>
+              <li key={a} className="flex justify-between py-2.5"><span>{a}</span><span className="font-mono text-[12px] text-minus-hi">{b}</span></li>
             ))}
           </ul>
         </Reveal>
         <Reveal delay={0.1} className="col-span-12 lg:col-span-7">
           <Terminal title="make difftest50" className="max-w-none">
-            <TypingAnimation className="text-paper/60" duration={30}>$ scripts/difftest.sh "1 … 50" 1000 10</TypingAnimation>
-            <AnimatedSpan className="text-paper">seed 1: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
-            <AnimatedSpan className="text-paper">seed 2: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
-            <AnimatedSpan className="text-paper/40">…</AnimatedSpan>
-            <AnimatedSpan className="text-paper">seed 50: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
-            <AnimatedSpan className="text-[#7fc89a]">difftest: 50 seed(s) passed</AnimatedSpan>
-            <TypingAnimation className="text-paper/60" duration={30}>$ scripts/crashtest.sh kill 200</TypingAnimation>
-            <AnimatedSpan className="text-paper">crashtest: 200 cycles (kill) then a clean differential check</AnimatedSpan>
-            <AnimatedSpan className="text-[#7fc89a]">check passed: 14 views equal to postgres</AnimatedSpan>
+            <TypingAnimation className="text-fg-2" duration={30}>$ scripts/difftest.sh "1 … 50" 1000 10</TypingAnimation>
+            <AnimatedSpan className="text-bg">seed 1: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
+            <AnimatedSpan className="text-bg">seed 2: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
+            <AnimatedSpan className="text-fg-3">…</AnimatedSpan>
+            <AnimatedSpan className="text-bg">seed 50: 1000 transactions, 101 checks of 14 views, all equal</AnimatedSpan>
+            <AnimatedSpan className="text-plus-hi">difftest: 50 seed(s) passed</AnimatedSpan>
+            <TypingAnimation className="text-fg-2" duration={30}>$ scripts/crashtest.sh kill 200</TypingAnimation>
+            <AnimatedSpan className="text-bg">crashtest: 200 cycles (kill) then a clean differential check</AnimatedSpan>
+            <AnimatedSpan className="text-plus-hi">check passed: 14 views equal to postgres</AnimatedSpan>
           </Terminal>
         </Reveal>
       </div>

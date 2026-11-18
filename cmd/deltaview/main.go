@@ -5,6 +5,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -13,6 +15,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -35,6 +38,8 @@ func main() {
 		noSync    = flag.Bool("no-sync", false, "commit without fsync (benchmarks only; breaks crash safety)")
 		reset     = flag.Bool("reset", false, "discard state and take a fresh snapshot")
 		printChgs = flag.Bool("print-changes", false, "print every transaction's row changes")
+		sqlCons   = flag.Bool("sql-console", os.Getenv("DV_SQL_CONSOLE") == "1", "let the website run SQL on Postgres (token protected)")
+		token     = flag.String("console-token", os.Getenv("DV_CONSOLE_TOKEN"), "token for the SQL console (random if empty)")
 		verbose   = flag.Bool("v", false, "debug logging")
 	)
 	flag.Parse()
@@ -48,7 +53,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if err := run(ctx, log, runConfig{*pgURL, *views, *stateDir, *memory, *addr, *slot, *pub, *batchMax,
-		*noSync, *reset, *printChgs}); err != nil {
+		*noSync, *reset, *printChgs, *sqlCons, *token}); err != nil {
 		log.Error("deltaview stopped", "err", err)
 		os.Exit(1)
 	}
@@ -60,6 +65,8 @@ type runConfig struct {
 	addr, slot, pub        string
 	batchMax               int
 	noSync, reset, print   bool
+	sqlConsole             bool
+	token                  string
 }
 
 func run(ctx context.Context, log *slog.Logger, rc runConfig) error {
@@ -103,13 +110,25 @@ func run(ctx context.Context, log *slog.Logger, rc runConfig) error {
 	if err != nil {
 		return fmt.Errorf("listen %s: %w", rc.addr, err)
 	}
-	srv := &http.Server{Handler: serve.New(e, metrics), ReadHeaderTimeout: 10 * time.Second}
+	if rc.sqlConsole && rc.token == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		rc.token = hex.EncodeToString(b)
+	}
+	handler := serve.New(e, metrics, serve.Options{SQLConsole: rc.sqlConsole, Token: rc.token, PGURL: rc.pgURL})
+	srv := &http.Server{Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("http server", "err", err)
 		}
 	}()
-	log.Info("serving", "addr", ln.Addr().String())
+	log.Info("serving", "addr", ln.Addr().String(), "website", "http://localhost"+portOf(ln.Addr().String()))
+	if rc.sqlConsole {
+		log.Info("SQL console on; open the console from this engine, or connect the public site with this link",
+			"link", "https://pranshujain8532.github.io/deltaview/console.html#engine=http://localhost"+portOf(ln.Addr().String())+"&token="+rc.token)
+	}
 	defer func() {
 		sctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
@@ -123,4 +142,12 @@ func envOr(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// portOf returns ":PORT" from a listen address.
+func portOf(addr string) string {
+	if i := strings.LastIndexByte(addr, ':'); i >= 0 {
+		return addr[i:]
+	}
+	return addr
 }

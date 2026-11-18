@@ -18,36 +18,72 @@ import (
 	"github.com/pranshujain8532/deltaview/internal/zset"
 )
 
-// Server is the HTTP front of the engine. Handlers only read: views from
-// store snapshots, deltas from subscriptions. They never touch state.
+// Server is the HTTP front of the engine. The view handlers only read:
+// views from store snapshots, deltas from subscriptions. They never touch
+// state. The optional SQL console writes to Postgres, never to the engine.
 type Server struct {
 	e         *engine.Engine
 	metrics   *obs.Metrics
 	mux       *http.ServeMux
+	opts      Options
 	Keepalive time.Duration
 }
 
+// Options configures the optional parts of the server.
+type Options struct {
+	// SQLConsole enables POST /sql, which runs statements on Postgres so a
+	// user can make a change and watch it flow through the views.
+	SQLConsole bool
+	// Token must be sent as X-DeltaView-Token with every /sql request. It is
+	// injected only into pages this server serves itself, which other
+	// origins cannot read, so no other website can run SQL here.
+	Token string
+	// PGURL is the database /sql connects to.
+	PGURL string
+}
+
 // New builds the handler for every endpoint.
-func New(e *engine.Engine, m *obs.Metrics) *Server {
-	s := &Server{e: e, metrics: m, mux: http.NewServeMux(), Keepalive: 15 * time.Second}
-	s.mux.HandleFunc("GET /views", s.listViews)
-	s.mux.HandleFunc("GET /views/{name}", s.getView)
-	s.mux.HandleFunc("GET /views/{name}/subscribe", s.subscribe)
-	s.mux.HandleFunc("GET /status", s.status)
+func New(e *engine.Engine, m *obs.Metrics, opts Options) *Server {
+	s := &Server{e: e, metrics: m, mux: http.NewServeMux(), opts: opts, Keepalive: 15 * time.Second}
+	api := func(pattern string, h http.HandlerFunc) { s.mux.HandleFunc(pattern, cors(h)) }
+	api("GET /views", s.listViews)
+	api("GET /views/{name}", s.getView)
+	api("GET /views/{name}/subscribe", s.subscribe)
+	api("GET /status", s.status)
+	api("POST /sql", s.sql)
+	api("OPTIONS /sql", s.preflight)
 	if m != nil {
-		s.mux.Handle("GET /metrics", promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{}))
+		h := promhttp.HandlerFor(m.Registry, promhttp.HandlerOpts{})
+		api("GET /metrics", h.ServeHTTP)
 	}
-	s.mux.HandleFunc("GET /{$}", s.demo)
-	s.mux.HandleFunc("GET /demo", s.demo)
+	s.mux.HandleFunc("GET /{$}", s.page("index.html"))
+	s.mux.HandleFunc("GET /console", s.page("console.html"))
+	s.mux.HandleFunc("GET /demo", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/console", http.StatusFound)
+	})
+	s.mux.Handle("GET /", staticFiles())
 	return s
 }
 
-// ServeHTTP serves the API. Every endpoint is read-only, so any origin may
-// read it: the showcase site can then follow a locally running engine.
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
-	s.mux.ServeHTTP(w, r)
+// cors lets any origin read the API: the showcase site on GitHub Pages can
+// then follow a locally running engine. Pages (HTML) do not get this header.
+func cors(h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		h(w, r)
+	}
 }
+
+func (s *Server) preflight(w http.ResponseWriter, _ *http.Request) {
+	h := w.Header()
+	h.Set("Access-Control-Allow-Methods", "POST")
+	h.Set("Access-Control-Allow-Headers", "Content-Type, X-DeltaView-Token")
+	h.Set("Access-Control-Allow-Private-Network", "true")
+	h.Set("Access-Control-Max-Age", "600")
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
 
 type columnJSON struct {
 	Name string `json:"name"`
@@ -242,6 +278,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"heartbeat":       p.Heartbeat,
 		"slot_lag_bytes":  s.e.SlotLag(),
 		"queue_depth":     s.e.QueueDepth(),
+		"sql_console":     s.opts.SQLConsole,
 		"views":           views,
 	})
 }

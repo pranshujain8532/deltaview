@@ -1,5 +1,5 @@
 # docker compose up        Postgres + DeltaView + a load generator (the demo),
-#                          then open http://localhost:8080
+#                          then open http://localhost:8080 (and /console)
 # make up                  Postgres only, for development and tests
 services:
   postgres:
@@ -33,6 +33,8 @@ services:
     build: .
     environment:
       DV_PG_URL: postgres://deltaview:deltaview@postgres:5432/deltaview?sslmode=disable
+      # The website at localhost:8080 may run SQL (token protected). Remove to make it read-only.
+      DV_SQL_CONSOLE: "1"
     ports:
       - "8080:8080"
     volumes:

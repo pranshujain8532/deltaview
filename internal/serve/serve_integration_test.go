@@ -6,9 +6,11 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -52,7 +54,7 @@ func TestHTTPViewAndSubscribe(t *testing.T) {
 	for !e.Ready() {
 		time.Sleep(10 * time.Millisecond)
 	}
-	srv := httptest.NewServer(New(e, nil))
+	srv := httptest.NewServer(New(e, nil, Options{SQLConsole: true, Token: "t0k", PGURL: url}))
 	defer srv.Close()
 
 	var view struct {
@@ -117,6 +119,47 @@ func TestHTTPViewAndSubscribe(t *testing.T) {
 	if ev[0] != "delta" || !strings.Contains(ev[1], `{"row":["paid",1,10.5],"weight":-1}`) ||
 		!strings.Contains(ev[1], `{"row":["paid",2,11.5],"weight":1}`) {
 		t.Fatalf("delta event %v", ev)
+	}
+
+	// The SQL console: a wrong token is refused; the right one runs the
+	// statement, and the change reaches subscribers through the WAL.
+	post := func(token, sql string) (*http.Response, map[string]any) {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/sql", strings.NewReader(`{"sql":`+strconv.Quote(sql)+`}`))
+		req.Header.Set("X-DeltaView-Token", token)
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var body map[string]any
+		_ = json.NewDecoder(resp.Body).Decode(&body)
+		return resp, body
+	}
+	if resp, _ := post("wrong", "DELETE FROM orders"); resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("wrong token: status %d", resp.StatusCode)
+	}
+	resp, body := post("t0k", "UPDATE orders SET amount = 5 WHERE id = 2")
+	if resp.StatusCode != http.StatusOK || body["error"] != nil {
+		t.Fatalf("console update: %d %v", resp.StatusCode, body)
+	}
+	if tag := body["results"].([]any)[0].(map[string]any)["tag"]; tag != "UPDATE 1" {
+		t.Fatalf("command tag %v", tag)
+	}
+	ev = next()
+	if ev[0] != "delta" || !strings.Contains(ev[1], `{"row":["paid",2,15.5],"weight":1}`) {
+		t.Fatalf("console change did not reach the subscriber: %v", ev)
+	}
+	page, err := http.Get(srv.URL + "/console")
+	if err != nil {
+		t.Fatal(err)
+	}
+	html, _ := io.ReadAll(page.Body)
+	page.Body.Close()
+	if page.Header.Get("Access-Control-Allow-Origin") != "" {
+		t.Fatal("pages must not be readable cross-origin: they carry the console token")
+	}
+	if page.StatusCode == http.StatusOK && !strings.Contains(string(html), `<meta name="dv-token" content="t0k">`) {
+		t.Fatal("console page is missing the injected token")
 	}
 	cancel()
 	<-done

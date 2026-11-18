@@ -9,7 +9,7 @@ CYCLES ?= 200
 ROWS ?= 1000000
 RUNS ?= 20
 
-.PHONY: up down psql check itest build fmt difftest difftest50 crashtest failpoints snapshottest bench demo
+.PHONY: up down psql check itest build fmt site difftest difftest50 crashtest failpoints snapshottest bench demo
 
 ## up: start Postgres with wal_level=logical and wait until it is healthy
 up:
@@ -35,6 +35,11 @@ itest:
 
 build:
 	go build -o bin/ ./cmd/...
+
+## site: rebuild the website and embed it in the engine binary (needs Node 22)
+site:
+	cd site && npm ci && npm run build
+	rm -rf internal/serve/web && cp -r site/dist internal/serve/web
 
 fmt:
 	gofmt -w .

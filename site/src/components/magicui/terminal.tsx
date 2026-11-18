@@ -275,11 +275,11 @@ export const Terminal = ({
     <div
       ref={containerRef}
       className={cn(
-        "z-0 h-full w-full border border-ink bg-ink text-paper",
+        "z-0 h-full w-full overflow-hidden rounded-xl border border-line bg-[#080908] text-fg",
         className
       )}
     >
-      <div className="flex items-center justify-between border-b border-paper/15 px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-paper/50">
+      <div className="flex items-center justify-between border-b border-line px-4 py-2.5 font-mono text-[11px] uppercase tracking-[0.14em] text-fg-3">
         <span>{title}</span>
         <span>bash</span>
       </div>

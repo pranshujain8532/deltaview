@@ -4,6 +4,8 @@ DeltaView keeps SQL views over Postgres up to date by processing only the rows t
 
 **Website:** https://pranshujain8532.github.io/deltaview/ (an interactive walk-through: follow one change through the engine, try the delta algebra, watch a live view; source in [`site/`](site)).
 
+The same website is built into the engine. Run DeltaView and open `http://localhost:8080`: the page connects to that engine on its own and every live part shows your real views. `http://localhost:8080/console` lists your views, streams any of them, shows engine health from `/metrics`, and (with `--sql-console`) lets you run SQL and watch the change flow through.
+
 `REFRESH MATERIALIZED VIEW` re-reads every row even when one row changed. DeltaView reads
 Postgres's logical replication stream instead, turns each committed transaction into a small
 delta, and pushes that delta through the view's query plan. Every operator knows how to turn
@@ -108,7 +110,8 @@ curl -N localhost:8080/views/revenue_by_city/subscribe
 ```
 
 Flags: `--views FILE`, `--state-dir DIR`, `--memory`, `--http ADDR`, `--batch-max N` (group commit),
-`--reset` (fresh snapshot), `--print-changes`.
+`--reset` (fresh snapshot), `--print-changes`, `--sql-console` (let the website run SQL; protected by a token the
+engine injects only into pages it serves itself, and prints as a link for the public site).
 
 ### HTTP API
 
@@ -118,7 +121,9 @@ GET /views/NAME               rows plus the LSN they are valid at
 GET /views/NAME/subscribe     SSE: a snapshot event with its LSN, then delta events
 GET /status                   applied LSN, heartbeat sequence, slot lag
 GET /metrics                  Prometheus metrics
-GET /                         live demo page (?view=NAME)
+POST /sql                     run SQL on Postgres (only with --sql-console; needs X-DeltaView-Token)
+GET /                         the website, connected to this engine
+GET /console                  the console: views, live deltas, health, SQL
 ```
 
 Every delta carries the LSN it brings the view to. Delivery to subscribers is at-least-once, so
