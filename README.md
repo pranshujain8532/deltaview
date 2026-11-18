@@ -2,6 +2,8 @@
 
 DeltaView keeps SQL views over Postgres up to date by processing only the rows that changed.
 
+**Website:** https://pranshujain8532.github.io/deltaview/ (an interactive walk-through: follow one change through the engine, try the delta algebra, watch a live view; source in [`site/`](site)).
+
 `REFRESH MATERIALIZED VIEW` re-reads every row even when one row changed. DeltaView reads
 Postgres's logical replication stream instead, turns each committed transaction into a small
 delta, and pushes that delta through the view's query plan. Every operator knows how to turn

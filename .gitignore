@@ -5,3 +5,5 @@
 *.out
 coverage.txt
 bench/results/*.csv
+/site/node_modules/
+/site/dist/

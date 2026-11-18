@@ -42,7 +42,12 @@ func New(e *engine.Engine, m *obs.Metrics) *Server {
 	return s
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// ServeHTTP serves the API. Every endpoint is read-only, so any origin may
+// read it: the showcase site can then follow a locally running engine.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	s.mux.ServeHTTP(w, r)
+}
 
 type columnJSON struct {
 	Name string `json:"name"`

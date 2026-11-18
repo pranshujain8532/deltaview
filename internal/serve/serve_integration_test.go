@@ -68,6 +68,9 @@ func TestHTTPViewAndSubscribe(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp.Body.Close()
+	if got := resp.Header.Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Fatalf("read-only API must allow any origin, got %q", got)
+	}
 	if len(view.Rows) != 1 || view.Rows[0][0] != "paid" || view.Rows[0][2] != 10.5 || view.LSN == "" {
 		t.Fatalf("GET view: %+v", view)
 	}
