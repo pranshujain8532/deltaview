@@ -23,6 +23,7 @@ Status: complete, all checks green
 Stretch goals 3 to 5 (CREATE VIEW at runtime, Postgres wire protocol, MCP server).
 
 ## Open problems
+- GitHub CI fails at the difftest step (exit 2) but the same steps pass locally; read the CI log.
 - SUM/AVG over float8 accumulate rounding error under deletes (numeric is exact).
 - Numeric display scale is not kept (150.00 is served as 150).
 - A transaction is held in memory until its commit arrives (proto_version 1).
@@ -38,3 +39,6 @@ See README "Measured numbers" and bench/results/*.csv (machine and date in each 
 - difftest: 50 seeds x 1,000 txns, 14 views, 101 checks per seed: 0 mismatches
 - crash test: 200 kill -9 cycles (31,389 writer txns) then clean check; each fail point 30/30
 - expression tests vs Postgres: 112 expressions x 6 rows, all equal
+- snapshot under live writes: 1M rows x 1 run, 100k rows x 5 runs, all clean (20 x 1M not done: disk)
+- refresh vs incremental (1,000 changes): 2M rows REFRESH 127.8 ms, DeltaView 62.5 ms
+- latency p50 2.7 ms, p99 4.3 ms; throughput 11.5k-52k txn/s by view shape (2 CPUs)

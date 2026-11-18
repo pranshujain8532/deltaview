@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
+	"os"
 
 	"github.com/cockroachdb/pebble/v2"
 )
@@ -17,7 +19,7 @@ type Pebble struct {
 
 // OpenPebble opens (or creates) a Pebble store in dir.
 func OpenPebble(dir string) (*Pebble, error) {
-	db, err := pebble.Open(dir, &pebble.Options{})
+	db, err := pebble.Open(dir, &pebble.Options{Logger: quietLogger{}})
 	if err != nil {
 		return nil, fmt.Errorf("state: open pebble at %s: %w", dir, err)
 	}
@@ -155,3 +157,16 @@ func (e *errIter) Next() bool    { return false }
 func (e *errIter) Key() []byte   { return nil }
 func (e *errIter) Value() []byte { return nil }
 func (e *errIter) Close() error  { return e.err }
+
+// quietLogger drops Pebble's informational messages (they would interleave
+// with the engine's own logs) and keeps errors.
+type quietLogger struct{}
+
+func (quietLogger) Infof(string, ...interface{}) {}
+func (quietLogger) Errorf(format string, args ...interface{}) {
+	log.Printf("pebble: "+format, args...)
+}
+func (quietLogger) Fatalf(format string, args ...interface{}) {
+	log.Printf("pebble: fatal: "+format, args...)
+	os.Exit(1)
+}

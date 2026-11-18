@@ -170,13 +170,41 @@ Go 1.27.4. Report only measured numbers; `make bench` writes the rest to `bench/
 | Mutation checks | 6 of 6 planted bugs caught (see `docs/notes.md`) |
 | Crash test | 200 random `kill -9` cycles while a writer committed 31,389 transactions, then a clean check |
 | Fail points | before commit, after commit, after ack: each fired 30 of 30 times, then a clean check |
-| Initial snapshot | 1,000,000 orders into 13 views in 160 s while a writer committed 7,806 transactions; clean check afterwards (1 run) |
+| Initial snapshot | 1,000,000 orders into 13 views in 160 s while a writer committed 7,806 transactions, clean check afterwards (1 run); 100,000 orders in 10–13 s with a live writer, 5 of 5 runs clean |
 | Expressions vs Postgres | 112 expressions x 6 rows, all equal |
 | Stalled subscriber | 100 transactions applied in 142 ms with a stalled subscriber, which was dropped |
 
-Performance benchmarks (refresh vs incremental, latency, throughput, group commit, state size,
-recovery, pg_ivm) are implemented in `cmd/dvbench` but have not been run on this machine yet.
-Run `make bench` and copy the CSV numbers here.
+### Performance (`make bench`)
+
+Measured with the engine in a Docker container capped at 2 CPUs, Postgres 17.12 in Docker, on the
+same laptop. Single runs, not averaged; treat them as orders of magnitude.
+
+**Refresh versus incremental** (view `revenue_by_city`, a join plus an aggregate; 1,000 changed
+orders in 100 transactions):
+
+| Orders | `REFRESH MATERIALIZED VIEW` | DeltaView applies the 1,000 changes |
+|---:|---:|---:|
+| 100,000 | 19.7 ms | 67.8 ms |
+| 500,000 | 43.5 ms | 59.1 ms |
+| 2,000,000 | 127.8 ms | 62.5 ms |
+
+Refresh time grows with the table; DeltaView's stays flat because it depends on the change, not the
+table. On small tables a full refresh is still cheaper; here the crossover is between 500,000 and
+2,000,000 rows. DeltaView's number includes 100 fsynced commits and one heartbeat round trip.
+
+| Benchmark | Result |
+|---|---|
+| End-to-end latency, Postgres commit to view commit, 200 txn/s for 10 s | p50 2.7 ms, p99 4.3 ms, max 20.6 ms |
+| Throughput, filter view | 52,400 txn/s (104,900 row changes/s) |
+| Throughput, aggregate view | 13,100 txn/s |
+| Throughput, join view | 14,200 txn/s |
+| Throughput, join + aggregate view | 11,500 txn/s |
+| Group commit, fsync per transaction vs per 64 | 11,400 vs 13,100 txn/s |
+| State size at 500,000 orders | filter 0.12x, aggregate 0.04x, join 0.29x, join + aggregate 0.21x of the source tables |
+| Recovery with 5,000 transactions pending | ready in 30 ms, caught up in 458 ms |
+| pg_ivm comparison | not run: the extension is not installed in the stock Postgres image |
+
+Throughput is single-row update transactions waiting in the slot, applied by one restarted engine.
 
 ## Limitations
 
