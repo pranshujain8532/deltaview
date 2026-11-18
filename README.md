@@ -161,7 +161,22 @@ so everything before the heartbeat has been applied. It then compares each view 
 
 ## Measured numbers
 
-MEASURED_NUMBERS_PLACEHOLDER
+Measured on a Windows 11 laptop (12 logical CPUs, 8 GB given to Docker), Postgres 17 in Docker,
+Go 1.27.4. Report only measured numbers; `make bench` writes the rest to `bench/results/`.
+
+| What | Result |
+|---|---|
+| Differential test | 50 seeds x 1,000 random transactions, 14 views, 101 checks per seed: 0 mismatches |
+| Mutation checks | 6 of 6 planted bugs caught (see `docs/notes.md`) |
+| Crash test | 200 random `kill -9` cycles while a writer committed 31,389 transactions, then a clean check |
+| Fail points | before commit, after commit, after ack: each fired 30 of 30 times, then a clean check |
+| Initial snapshot | 1,000,000 orders into 13 views in 160 s while a writer committed 7,806 transactions; clean check afterwards (1 run) |
+| Expressions vs Postgres | 112 expressions x 6 rows, all equal |
+| Stalled subscriber | 100 transactions applied in 142 ms with a stalled subscriber, which was dropped |
+
+Performance benchmarks (refresh vs incremental, latency, throughput, group commit, state size,
+recovery, pg_ivm) are implemented in `cmd/dvbench` but have not been run on this machine yet.
+Run `make bench` and copy the CSV numbers here.
 
 ## Limitations
 
