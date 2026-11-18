@@ -67,4 +67,4 @@ bench:
 
 ## demo: Postgres, DeltaView and a load generator; open http://localhost:8080
 demo:
-	docker compose --profile demo up --build
+	docker compose up --build
