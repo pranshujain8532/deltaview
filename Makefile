@@ -3,7 +3,7 @@ export DV_PG_URL ?= $(PG_URL)
 
 SEED ?= 1
 
-.PHONY: up down psql check build fmt
+.PHONY: up down psql check itest build fmt
 
 ## up: start Postgres with wal_level=logical and wait until it is healthy
 up:
@@ -28,3 +28,7 @@ build:
 
 fmt:
 	gofmt -w .
+
+## itest: integration tests against the Docker Postgres (make up first)
+itest:
+	go test -tags integration -count=1 ./...
