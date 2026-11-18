@@ -41,25 +41,25 @@ fmt:
 
 ## difftest: differential test, e.g. make difftest SEED=3 or SEEDS="1 2 3" TXNS=500
 difftest:
-	scripts/difftest.sh "$(SEEDS)" $(TXNS) $(CHECK_EVERY)
+	bash scripts/difftest.sh "$(SEEDS)" $(TXNS) $(CHECK_EVERY)
 
 ## difftest50: the milestone bar, 50 seeds of 1,000 transactions
 difftest50:
-	scripts/difftest.sh "$$(seq -s ' ' 1 50)" 1000 $(CHECK_EVERY)
+	bash scripts/difftest.sh "$$(seq -s ' ' 1 50)" 1000 $(CHECK_EVERY)
 
 ## crashtest: kill -9 the engine CYCLES times under load, then a full check
 crashtest:
-	scripts/crashtest.sh kill $(CYCLES)
+	bash scripts/crashtest.sh kill $(CYCLES)
 
 ## failpoints: each fail point on its own, then a full check
 failpoints:
-	scripts/crashtest.sh failpoint before_commit 30
-	scripts/crashtest.sh failpoint after_commit 30
-	scripts/crashtest.sh failpoint after_ack 30
+	bash scripts/crashtest.sh failpoint before_commit 30
+	bash scripts/crashtest.sh failpoint after_commit 30
+	bash scripts/crashtest.sh failpoint after_ack 30
 
 ## snapshottest: initial snapshot of ROWS orders with a live writer, RUNS times
 snapshottest:
-	scripts/snapshottest.sh $(ROWS) $(RUNS)
+	bash scripts/snapshottest.sh $(ROWS) $(RUNS)
 
 ## bench: run every benchmark in docs/benchmarks.md and write CSV to bench/results
 bench:
